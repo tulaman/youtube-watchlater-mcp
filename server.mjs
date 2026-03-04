@@ -6,10 +6,11 @@ import { execFile } from "node:child_process";
 
 function runYtDlp(args) {
   return new Promise((resolve, reject) => {
-    execFile("yt-dlp", args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile("yt-dlp", args, { maxBuffer: 50 * 1024 * 1024, timeout: 60_000 }, (err, stdout, stderr) => {
       if (err) {
+        const timedOut = err.killed ? " (process timed out)" : "";
         const msg = (stderr || stdout || err.message || "").toString().slice(0, 1000);
-        reject(new Error(`yt-dlp failed: ${msg}`));
+        reject(new Error(`yt-dlp failed${timedOut}: ${msg}`));
       } else {
         resolve(stdout.toString());
       }
@@ -19,34 +20,31 @@ function runYtDlp(args) {
 
 const server = new McpServer({ name: "youtube-watchlater", version: "0.1.0" });
 
-const InputSchema = z.object({
-  browser: z.enum(["chrome", "brave", "edge", "firefox"])
-    .default("chrome")
-    .describe("Which browser to read YouTube cookies from (cookies-from-browser)."),
-  limit: z.number().int().min(1).max(500)
-    .default(50)
-    .describe("How many items to return from Watch Later."),
-  profile: z.string()
-    .optional()
-    .describe('Browser profile name, e.g. "Default" or "Profile 1" (Chrome/Brave/Edge).'),
-});
-
 server.tool(
   "get_watch_later",
-  "Returns videos from your YouTube Watch Later list using yt-dlp + cookies-from-browser. Args example: {"browser":"chrome","limit":50,"profile":"Profile 1"}`",
-  InputSchema,
+  "Returns videos from your YouTube Watch Later list using yt-dlp with cookies read from a local browser.",
+  {
+    browser: z.enum(["chrome", "brave", "edge", "firefox"])
+      .default("chrome")
+      .describe("Which browser to read YouTube cookies from."),
+    limit: z.number().int().min(1).max(500)
+      .default(50)
+      .describe("How many items to return from Watch Later."),
+    profile: z.string()
+      .regex(/^[^:]+$/, "Profile name must not contain a colon")
+      .optional()
+      .describe('Browser profile name, e.g. "Default" or "Profile 1" (Chrome/Brave/Edge).'),
+  },
   async ({ browser, limit, profile }) => {
     const wlUrl = "https://www.youtube.com/playlist?list=WL";
 
-    const cookieArg = profile
-      ? `${browser}:${profile}`
-      : browser;
+    const cookieArg = profile ? `${browser}:${profile}` : browser;
 
     const args = [
       "--cookies-from-browser", cookieArg,
       "--flat-playlist",
       "--dump-json",
-      "--playlist-end", String(limit ?? 50),
+      "--playlist-end", String(limit),
       wlUrl,
     ];
 
@@ -57,7 +55,12 @@ server.tool(
       .split("\n")
       .filter(Boolean)
       .map((line) => {
-        const x = JSON.parse(line);
+        let x;
+        try {
+          x = JSON.parse(line);
+        } catch {
+          return null;
+        }
         const id = x.id;
         return {
           videoId: id,
@@ -65,7 +68,8 @@ server.tool(
           url: x.url ?? (id ? `https://www.youtube.com/watch?v=${id}` : null),
           channel: x.channel ?? x.uploader ?? null,
         };
-      });
+      })
+      .filter(Boolean);
 
     return {
       content: [{ type: "text", text: JSON.stringify({ items }, null, 2) }],
