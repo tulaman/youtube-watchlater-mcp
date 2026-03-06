@@ -3,9 +3,34 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { execFile } from "node:child_process";
+import { unlinkSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// Cache the exported cookies file path so macOS Keychain auth fires only once per process.
+// NOTE: cache is global (not per browser/profile). If you switch browsers, restart the server.
+let cookiesFilePath = null;
+
+function cleanupCookies() {
+  if (cookiesFilePath) {
+    try { unlinkSync(cookiesFilePath); } catch {}
+    cookiesFilePath = null;
+  }
+}
+process.on("exit", cleanupCookies);
+process.on("SIGINT", () => { cleanupCookies(); process.exit(0); });
+process.on("SIGTERM", () => { cleanupCookies(); process.exit(0); });
+
+function getCookieArgs(browser, profile) {
+  const browserArg = profile ? `${browser}:${profile}` : browser;
+  if (cookiesFilePath) {
+    return ["--cookies", cookiesFilePath];
+  }
+  // First call: export browser cookies to temp file and reuse for all subsequent calls.
+  cookiesFilePath = join(tmpdir(), `yt-cookies-${process.pid}.txt`);
+  return ["--cookies-from-browser", browserArg, "--cookies", cookiesFilePath];
+}
 
 function runYtDlp(args) {
   return new Promise((resolve, reject) => {
@@ -41,17 +66,21 @@ server.tool(
   async ({ browser, limit, profile }) => {
     const wlUrl = "https://www.youtube.com/playlist?list=WL";
 
-    const cookieArg = profile ? `${browser}:${profile}` : browser;
-
     const args = [
-      "--cookies-from-browser", cookieArg,
+      ...getCookieArgs(browser, profile),
       "--flat-playlist",
       "--dump-json",
       "--playlist-end", String(limit),
       wlUrl,
     ];
 
-    const stdout = await runYtDlp(args);
+    let stdout;
+    try {
+      stdout = await runYtDlp(args);
+    } catch (err) {
+      cookiesFilePath = null; // force re-export on next call
+      throw err;
+    }
 
     const items = stdout
       .trim()
@@ -110,12 +139,11 @@ server.tool(
       }
     })();
 
-    const cookieArg = profile ? `${browser}:${profile}` : browser;
     const tmpDir = await mkdtemp(join(tmpdir(), "yt-sub-"));
 
     try {
       const args = [
-        "--cookies-from-browser", cookieArg,
+        ...getCookieArgs(browser, profile),
         "--skip-download",
         "--write-auto-subs",
         "--sub-langs", lang,
@@ -124,7 +152,12 @@ server.tool(
         url,
       ];
 
-      await runYtDlp(args);
+      try {
+        await runYtDlp(args);
+      } catch (err) {
+        cookiesFilePath = null; // force re-export on next call
+        throw err;
+      }
 
       const files = await readdir(tmpDir);
       const vttFile = files.find((f) => f.endsWith(".vtt"));
