@@ -91,6 +91,27 @@ Example response:
 }
 ```
 
+## Tool: `get_subtitles`
+
+Downloads auto-generated subtitles for a YouTube video and returns the VTT content.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `video` | string | — | YouTube video URL or bare video ID (e.g. `dQw4w9WgXcQ`) |
+| `lang` | string | `"en"` | Subtitle language code, e.g. `"en"` or `"ru"` |
+| `browser` | `chrome` \| `brave` \| `edge` \| `firefox` | `chrome` | Browser to read YouTube cookies from |
+| `profile` | string | — | Browser profile name, e.g. `"Default"` or `"Profile 1"` |
+
+Example response:
+
+```json
+{
+  "lang": "en",
+  "videoId": "dQw4w9WgXcQ",
+  "subtitles": "WEBVTT\n..."
+}
+```
+
 ## How It Works
 
 The server calls `yt-dlp --cookies-from-browser <browser> --flat-playlist --dump-json` against the `WL` playlist. Cookies are read directly from the local browser — no tokens or passwords are transmitted anywhere.
