@@ -2,6 +2,19 @@
 
 MCP server for fetching your YouTube Watch Later playlist via [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
+## Why This Exists
+
+**The YouTube Watch Later playlist is invisible to the YouTube Data API.**
+
+Most YouTube MCP servers and integrations use the official [YouTube Data API v3](https://developers.google.com/youtube/v3) with OAuth authentication. This works well for public playlists, subscriptions, search, and liked videos — but Watch Later is a special private playlist (`WL`) that Google has explicitly excluded from the API. Even with full OAuth scopes and a valid token, the API returns an empty result or a `403 Forbidden` error for this playlist.
+
+This means:
+- **OAuth-based MCPs cannot access Watch Later** — the endpoint simply does not exist in the API.
+- **Scraping the YouTube web UI** requires managing session cookies, handling anti-bot measures, and is fragile against layout changes.
+- **yt-dlp with browser cookies** is the only reliable approach: it reads the authentication cookies that your browser already holds from your active YouTube login, and uses them to fetch the playlist directly — exactly as your browser would.
+
+This server wraps that mechanism as an MCP tool so AI assistants can read your Watch Later queue without you needing API keys, OAuth flows, or exposing credentials.
+
 ## Requirements
 
 - Node.js 18+
